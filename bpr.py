@@ -13,15 +13,13 @@ class BPRArgs(object):
                  user_regularization=0.0025,
                  positive_item_regularization=0.0025,
                  negative_item_regularization=0.00025,
-                 update_negative_item_factors=True,
-                 sample_negative_items_empirically=False):
+                 update_negative_item_factors=True):
         self.learning_rate = learning_rate
         self.bias_regularization = bias_regularization
         self.user_regularization = user_regularization
         self.positive_item_regularization = positive_item_regularization
         self.negative_item_regularization = negative_item_regularization
         self.update_negative_item_factors = update_negative_item_factors
-        self.sample_negative_items_empirically = sample_negative_items_empirically
 
 class BPR(object):
 
@@ -36,7 +34,6 @@ class BPR(object):
         self.positive_item_regularization = args.positive_item_regularization
         self.negative_item_regularization = args.negative_item_regularization
         self.update_negative_item_factors = args.update_negative_item_factors
-        self.sample_negative_items_empirically = args.sample_negative_items_empirically
 
     """
     data = user-item matrix as a scipy sparse matrix
@@ -48,14 +45,12 @@ class BPR(object):
     def train(self,data,sampling_strategy,sample_negative_items_empirically,num_iters):
         self.init(data)
 
-        print self.loss()
+        print 'initial loss = {0}'.format(self.loss())
         for it in xrange(num_iters):
-            print self.user_factors[:3,:]
-            print self.item_factors[:3,:]
             print 'starting iteration {0}'.format(it)
             sampler = sampling_strategy(self.data,sample_negative_items_empirically)
             self.iterate(sampler)
-            print self.loss()
+            print 'iteration {0}: loss = {1}'.format(it,self.loss())
 
     def iterate(self,sampler):
         for _ in xrange(self.data.nnz):
@@ -75,7 +70,7 @@ class BPR(object):
         num_triples = int(100*self.num_users**0.5)
 
         print 'sampling {0} <user,item i,item j> triples...'.format(num_triples)
-        sampler = UniformUserUniformItem(data,self.sample_negative_items_empirically)
+        sampler = UniformUserUniformItem(data,True)
         self.loss_samples = [sampler.sample_triple() for _ in xrange(num_triples)]
 
     """
