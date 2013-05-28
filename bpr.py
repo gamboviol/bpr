@@ -37,10 +37,7 @@ class BPR(object):
 
     """
     data = user-item matrix as a scipy sparse matrix
-           useors and items are zero-indexed
-
-           actually: it's just a list of lists of ids, no counts
-           -- let's assume we use ints 1/0
+           users and items are zero-indexed
     """
     def train(self,data,sampling_strategy,sample_negative_items_empirically,num_iters):
         self.init(data)
