@@ -39,13 +39,13 @@ class BPR(object):
     data = user-item matrix as a scipy sparse matrix
            users and items are zero-indexed
     """
-    def train(self,data,sampling_strategy,sample_negative_items_empirically,num_iters):
+    def train(self,data,sampler,num_iters):
         self.init(data)
 
         print 'initial loss = {0}'.format(self.loss())
         for it in xrange(num_iters):
             print 'starting iteration {0}'.format(it)
-            sampler = sampling_strategy(self.data,sample_negative_items_empirically)
+            sampler.init(self.data)
             self.iterate(sampler)
             print 'iteration {0}: loss = {1}'.format(it,self.loss())
 
@@ -67,7 +67,8 @@ class BPR(object):
         num_triples = int(100*self.num_users**0.5)
 
         print 'sampling {0} <user,item i,item j> triples...'.format(num_triples)
-        sampler = UniformUserUniformItem(data,True)
+        sampler = UniformUserUniformItem(True)
+        sampler.init(data)
         self.loss_samples = [sampler.sample_triple() for _ in xrange(num_triples)]
 
     """
@@ -121,11 +122,13 @@ class BPR(object):
 
 # sampling strategies
 
-class SamplingStrategy(object):
+class Sampler(object):
 
-    def __init__(self,data,sample_negative_items_empirically):
-        self.data = data
+    def __init__(self,sample_negative_items_empirically):
         self.sample_negative_items_empirically = sample_negative_items_empirically
+
+    def init(self,data):
+        self.data = data
         self.num_users,self.num_items = data.shape
 
     def sample_user(self):
@@ -135,9 +138,9 @@ class SamplingStrategy(object):
         return u
 
     def sample_negative_item(self,user_items):
-        j = self.random_item(empirical=self.sample_negative_items_empirically)
+        j = self.random_item()
         while j in user_items:
-            j = self.random_item(empirical=self.sample_negative_items_empirically)
+            j = self.random_item()
         return j
 
     def uniform_user(self):
@@ -147,8 +150,8 @@ class SamplingStrategy(object):
     sample an item uniformly or from the empirical distribution
     observed in the training data
     """
-    def random_item(self,empirical=False):
-        if empirical:
+    def random_item(self):
+        if self.sample_negative_items_empirically:
             # just pick something someone rated!
             u = self.uniform_user()
             i = random.choice(self.data[u].indices)
@@ -156,7 +159,7 @@ class SamplingStrategy(object):
             i = random.randint(0,self.num_items-1)
         return i
 
-class UniformUserUniformItem(SamplingStrategy):
+class UniformUserUniformItem(Sampler):
 
     def sample_triple(self):
         u = self.uniform_user()
@@ -165,10 +168,10 @@ class UniformUserUniformItem(SamplingStrategy):
         j = self.sample_negative_item(self.data[u].indices)
         return u,i,j
 
-class UniformUserUniformItemWithoutReplacement(SamplingStrategy):
+class UniformUserUniformItemWithoutReplacement(Sampler):
 
-    def __init__(self,data,sample_negative_items_empirically):
-        SamplingStrategy.__init__(self,sample_negative_items_empirically)
+    def init(self,data):
+        Sampler.init(self,data)
         # make a local copy of data as we're going to "forget" some entries
         self.local_data = self.data.copy()
 
@@ -187,11 +190,7 @@ class UniformUserUniformItemWithoutReplacement(SamplingStrategy):
         j = self.sample_negative_item(user_items)
         return u,i,j
 
-class UniformPair(SamplingStrategy):
-
-    def __init__(self,data,sample_negative_items_empirically):
-        SamplingStrategy.__init__(self,data,sample_negative_items_empirically)
-        self.users,self.items = self.data.nonzero()
+class UniformPair(Sampler):
 
     def sample_triple(self):
         idx = random.randint(0,self.data.nnz-1)
@@ -200,10 +199,10 @@ class UniformPair(SamplingStrategy):
         j = self.sample_negative_item(self.data[u])
         return u,i,j
 
-class UniformPairWithoutReplacement(SamplingStrategy):
+class UniformPairWithoutReplacement(Sampler):
 
-    def __init__(self,data,sample_negative_items_empirically):
-        SamplingStrategy.__init__(self,data,sample_negative_items_empirically)
+    def init(self,data):
+        Sampler.init(self,data)
         idxs = range(self.data.nnz)
         random.shuffle(idxs)
         self.users,self.items = self.data.nonzero()
@@ -218,6 +217,23 @@ class UniformPairWithoutReplacement(SamplingStrategy):
         self.idx += 1
         return u,i,j
 
+class ExternalSchedule(Sampler):
+
+    def __init__(self,filepath,index_offset=0):
+        self.filepath = filepath
+        self.index_offset = index_offset
+
+    def init(self,data):
+        f = open(self.filepath)
+        self.samples = [map(int,line.strip().split()) for line in f]
+        random.shuffle(self.samples)  # important!
+        self.idx = 0
+
+    def sample_triple(self):
+        u,i,j = self.samples[self.idx]
+        self.idx += 1
+        return u-self.index_offset,i-self.index_offset,j-self.index_offset
+
 if __name__ == '__main__':
 
     # learn a matrix factorization with BPR like this:
@@ -228,12 +244,12 @@ if __name__ == '__main__':
     data = mmread(sys.argv[1]).tocsr()
 
     args = BPRArgs()
-    args.learning_rate = 0.2
+    args.learning_rate = 0.3
 
     num_factors = 10
     model = BPR(num_factors,args)
 
-    sampling_strategy = UniformPairWithoutReplacement
     sample_negative_items_empirically = True
+    sampler = UniformPairWithoutReplacement(sample_negative_items_empirically)
     num_iters = 10
-    model.train(data,sampling_strategy,sample_negative_items_empirically,num_iters)
+    model.train(data,sampler,num_iters)
