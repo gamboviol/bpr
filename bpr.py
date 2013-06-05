@@ -23,10 +23,10 @@ class BPRArgs(object):
 
 class BPR(object):
 
-    """
-    D = number of factors
-    """
     def __init__(self,D,args):
+        """initialise BPR matrix factorization model
+        D: number of factors
+        """
         self.D = D
         self.learning_rate = args.learning_rate
         self.bias_regularization = args.bias_regularization
@@ -35,25 +35,19 @@ class BPR(object):
         self.negative_item_regularization = args.negative_item_regularization
         self.update_negative_item_factors = args.update_negative_item_factors
 
-    """
-    data = user-item matrix as a scipy sparse matrix
-           users and items are zero-indexed
-    """
     def train(self,data,sampler,num_iters):
+        """train model
+        data: user-item matrix as a scipy sparse matrix
+              users and items are zero-indexed
+        """
         self.init(data)
 
         print 'initial loss = {0}'.format(self.loss())
         for it in xrange(num_iters):
             print 'starting iteration {0}'.format(it)
-            sampler.init(self.data)
-            self.iterate(sampler)
+            for u,i,j in sampler.generate_samples(self.data):
+                self.update_factors(u,i,j)
             print 'iteration {0}: loss = {1}'.format(it,self.loss())
-
-    def iterate(self,sampler):
-        for _ in xrange(self.data.nnz):
-            u,i,j = sampler.sample_triple()
-            self.update_factors(u,i,j)
-
 
     def init(self,data):
         self.data = data
@@ -68,13 +62,10 @@ class BPR(object):
 
         print 'sampling {0} <user,item i,item j> triples...'.format(num_triples)
         sampler = UniformUserUniformItem(True)
-        sampler.init(data)
-        self.loss_samples = [sampler.sample_triple() for _ in xrange(num_triples)]
+        self.loss_samples = [t for t in sampler.generate_samples(data,num_triples)]
 
-    """
-    apply SGD update
-    """
     def update_factors(self,u,i,j,update_u=True,update_i=True):
+        """apply SGD update"""
         update_j = self.update_negative_item_factors
 
         x = self.item_bias[i] - self.item_bias[j] \
@@ -127,9 +118,10 @@ class Sampler(object):
     def __init__(self,sample_negative_items_empirically):
         self.sample_negative_items_empirically = sample_negative_items_empirically
 
-    def init(self,data):
+    def init(self,data,max_samples=None):
         self.data = data
         self.num_users,self.num_items = data.shape
+        self.max_samples = max_samples
 
     def sample_user(self):
         u = self.uniform_user()
@@ -146,11 +138,10 @@ class Sampler(object):
     def uniform_user(self):
         return random.randint(0,self.num_users-1)
 
-    """
-    sample an item uniformly or from the empirical distribution
-    observed in the training data
-    """
     def random_item(self):
+        """sample an item uniformly or from the empirical distribution
+           observed in the training data
+        """
         if self.sample_negative_items_empirically:
             # just pick something someone rated!
             u = self.uniform_user()
@@ -159,63 +150,70 @@ class Sampler(object):
             i = random.randint(0,self.num_items-1)
         return i
 
+    def num_samples(self,n):
+        if self.max_samples is None:
+            return n
+        return min(n,self.max_samples)
+
 class UniformUserUniformItem(Sampler):
 
-    def sample_triple(self):
-        u = self.uniform_user()
-        # sample positive item
-        i = random.choice(self.data[u].indices)
-        j = self.sample_negative_item(self.data[u].indices)
-        return u,i,j
+    def generate_samples(self,data,max_samples=None):
+        self.init(data,max_samples)
+        for _ in xrange(self.num_samples(self.data.nnz)):
+            u = self.uniform_user()
+            # sample positive item
+            i = random.choice(self.data[u].indices)
+            j = self.sample_negative_item(self.data[u].indices)
+            yield u,i,j
 
 class UniformUserUniformItemWithoutReplacement(Sampler):
 
-    def init(self,data):
-        Sampler.init(self,data)
+    def generate_samples(self,data,max_samples=None):
+        self.init(self,data,max_samples)
         # make a local copy of data as we're going to "forget" some entries
         self.local_data = self.data.copy()
-
-    def sample_triple(self):
-        u = self.uniform_user()
-        # sample positive item without replacement if we can
-        user_items = self.local_data[u].nonzero()[1]
-        if len(user_items) == 0:
-            # reset user data if it's all been sampled
-            for ix in self.local_data[u].indices:
-                self.local_data[u,ix] = self.data[u,ix]
+        for _ in xrange(self.num_samples(self.data.nnz)):
+            u = self.uniform_user()
+            # sample positive item without replacement if we can
             user_items = self.local_data[u].nonzero()[1]
-        i = random.choice(user_items)
-        # forget this item so we don't sample it again for the same user
-        self.local_data[u,i] = 0
-        j = self.sample_negative_item(user_items)
-        return u,i,j
+            if len(user_items) == 0:
+                # reset user data if it's all been sampled
+                for ix in self.local_data[u].indices:
+                    self.local_data[u,ix] = self.data[u,ix]
+                user_items = self.local_data[u].nonzero()[1]
+            i = random.choice(user_items)
+            # forget this item so we don't sample it again for the same user
+            self.local_data[u,i] = 0
+            j = self.sample_negative_item(user_items)
+            yield u,i,j
 
 class UniformPair(Sampler):
 
-    def sample_triple(self):
-        idx = random.randint(0,self.data.nnz-1)
-        u = self.users[self.idx]
-        i = self.items[self.idx]
-        j = self.sample_negative_item(self.data[u])
-        return u,i,j
+    def generate_samples(self,data,max_samples=None):
+        self.init(data,max_samples)
+        for _ in xrange(self.num_samples(self.data.nnz)):
+            idx = random.randint(0,self.data.nnz-1)
+            u = self.users[self.idx]
+            i = self.items[self.idx]
+            j = self.sample_negative_item(self.data[u])
+            yield u,i,j
 
 class UniformPairWithoutReplacement(Sampler):
 
-    def init(self,data):
-        Sampler.init(self,data)
+    def generate_samples(self,data,max_samples=None):
+        self.init(data,max_samples)
         idxs = range(self.data.nnz)
         random.shuffle(idxs)
         self.users,self.items = self.data.nonzero()
         self.users = self.users[idxs]
         self.items = self.items[idxs]
         self.idx = 0
-
-    def sample_triple(self):
-        u = self.users[self.idx]
-        i = self.items[self.idx]
-        j = self.sample_negative_item(self.data[u])
-        self.idx += 1
-        return u,i,j
+        for _ in xrange(self.num_samples(self.data.nnz)):
+            u = self.users[self.idx]
+            i = self.items[self.idx]
+            j = self.sample_negative_item(self.data[u])
+            self.idx += 1
+            yield u,i,j
 
 class ExternalSchedule(Sampler):
 
@@ -223,16 +221,14 @@ class ExternalSchedule(Sampler):
         self.filepath = filepath
         self.index_offset = index_offset
 
-    def init(self,data):
+    def generate_samples(self,data,max_samples=None):
+        self.init(data,max_samples)
         f = open(self.filepath)
-        self.samples = [map(int,line.strip().split()) for line in f]
-        random.shuffle(self.samples)  # important!
-        self.idx = 0
-
-    def sample_triple(self):
-        u,i,j = self.samples[self.idx]
-        self.idx += 1
-        return u-self.index_offset,i-self.index_offset,j-self.index_offset
+        samples = [map(int,line.strip().split()) for line in f]
+        random.shuffle(samples)  # important!
+        num_samples = self.num_samples(len(samples))
+        for u,i,j in samples[:num_samples]:
+            yield u-self.index_offset,i-self.index_offset,j-self.index_offset
 
 if __name__ == '__main__':
 
