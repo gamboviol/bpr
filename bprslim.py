@@ -20,7 +20,7 @@ from bpr import BPRArgs, ExternalSchedule
 
 class BPRSLIM(object):
 
-    def __init__(self,BPRArgs):
+    def __init__(self,args):
         """
         initialise SLIM model
         """
@@ -88,7 +88,7 @@ class BPRSLIM(object):
         return ranking_loss + 0.5*complexity
 
     def predict(self,u,i):
-        return sum(self.item_similarities[i,int(l)] for l in self.data[u].indices)
+        return sum(self.item_similarities[i,int(l)] for l in self.data[u].indices if l != i)
 
     def update_factors(self,u,i,j):
         """apply SGD update"""
