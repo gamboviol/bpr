@@ -57,12 +57,15 @@ class BPR(object):
         self.user_factors = np.random.random_sample((self.num_users,self.D))
         self.item_factors = np.random.random_sample((self.num_items,self.D))
 
-        # apply rule of thumb to decide num samples over which to compute loss
-        num_triples = int(100*self.num_users**0.5)
+        self.create_loss_samples()
 
-        print 'sampling {0} <user,item i,item j> triples...'.format(num_triples)
+    def create_loss_samples(self):
+        # apply rule of thumb to decide num samples over which to compute loss
+        num_loss_samples = int(100*self.num_users**0.5)
+
+        print 'sampling {0} <user,item i,item j> triples...'.format(num_loss_samples)
         sampler = UniformUserUniformItem(True)
-        self.loss_samples = [t for t in sampler.generate_samples(data,num_triples)]
+        self.loss_samples = [t for t in sampler.generate_samples(data,num_loss_samples)]
 
     def update_factors(self,u,i,j,update_u=True,update_i=True):
         """apply SGD update"""
