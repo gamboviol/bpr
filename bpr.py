@@ -1,5 +1,8 @@
 """
 Bayesian Personalized Ranking
+
+Matrix Factorization model and a variety of classes
+implementing different sampling strategies.
 """
 
 import numpy as np
